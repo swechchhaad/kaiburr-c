@@ -12,11 +12,6 @@ typedef struct{
   int16_t coeffs[KYBER_N];
 } poly;
 
-#define poly_compress KYBER_NAMESPACE(poly_compress)
-void poly_compress(uint8_t r[KYBER_POLYCOMPRESSEDBYTES], const poly *a);
-#define poly_decompress KYBER_NAMESPACE(poly_decompress)
-void poly_decompress(poly *r, const uint8_t a[KYBER_POLYCOMPRESSEDBYTES]);
-
 #define poly_tobytes KYBER_NAMESPACE(poly_tobytes)
 void poly_tobytes(uint8_t r[KYBER_POLYBYTES], const poly *a);
 #define poly_frombytes KYBER_NAMESPACE(poly_frombytes)

@@ -81,30 +81,6 @@ int main(void)
 
   for(i=0;i<NTESTS;i++) {
     t[i] = cpucycles();
-    poly_compress(ct,&ap);
-  }
-  print_results("poly_compress: ", t, NTESTS);
-
-  for(i=0;i<NTESTS;i++) {
-    t[i] = cpucycles();
-    poly_decompress(&ap,ct);
-  }
-  print_results("poly_decompress: ", t, NTESTS);
-
-  for(i=0;i<NTESTS;i++) {
-    t[i] = cpucycles();
-    polyvec_compress(ct,&matrix[0]);
-  }
-  print_results("polyvec_compress: ", t, NTESTS);
-
-  for(i=0;i<NTESTS;i++) {
-    t[i] = cpucycles();
-    polyvec_decompress(&matrix[0],ct);
-  }
-  print_results("polyvec_decompress: ", t, NTESTS);
-
-  for(i=0;i<NTESTS;i++) {
-    t[i] = cpucycles();
     indcpa_keypair_derand(pk, sk, coins32);
   }
   print_results("indcpa_keypair: ", t, NTESTS);
