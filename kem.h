@@ -9,12 +9,12 @@
 #define CRYPTO_CIPHERTEXTBYTES KYBER_CIPHERTEXTBYTES
 #define CRYPTO_BYTES           KYBER_SSBYTES
 
-#if   (KYBER_K == 2)
-#define CRYPTO_ALGNAME "Kyber512"
-#elif (KYBER_K == 3)
-#define CRYPTO_ALGNAME "Kyber768"
-#elif (KYBER_K == 4)
-#define CRYPTO_ALGNAME "Kyber1024"
+#if   (KYBER_K == 7)
+#define CRYPTO_ALGNAME "kaiburr4"
+#elif (KYBER_K == 18)
+#define CRYPTO_ALGNAME "kaiburr6"
+#elif (KYBER_K == 24)
+#define CRYPTO_ALGNAME "kaiburr8"
 #endif
 
 #define crypto_kem_keypair_derand KYBER_NAMESPACE(keypair_derand)

@@ -84,6 +84,7 @@ void polyvec_basemul_acc_montgomery(poly *r, const polyvec *a, const polyvec *b)
   for(i=1;i<KYBER_K;i++) {
     poly_basemul_montgomery(&t, &a->vec[i], &b->vec[i]);
     poly_add(r, r, &t);
+    poly_reduce(r);   /* reduce each iter so the running sum can't overflow */
   }
 
   poly_reduce(r);
