@@ -24,8 +24,16 @@
 #define KYBER_POLYBYTES		384
 #define KYBER_POLYVECBYTES	(KYBER_K * KYBER_POLYBYTES)
 
-#define KYBER_ETA1 2
-#define KYBER_ETA2 2
+#if   (KYBER_K == 7)      /* kaiburr4 */
+#define KYBER_FN 4
+#elif (KYBER_K == 18)     /* kaiburr6 */
+#define KYBER_FN 6
+#elif (KYBER_K == 24)     /* kaiburr8 */
+#define KYBER_FN 8
+#endif
+
+#define KYBER_NOISE_BYTES (KYBER_FN*KYBER_N/8)   /* n uniform bits per coefficient */
+
 
 #define KYBER_INDCPA_MSGBYTES       (KYBER_SYMBYTES)
 #define KYBER_INDCPA_PUBLICKEYBYTES (KYBER_POLYVECBYTES + KYBER_SYMBYTES)
