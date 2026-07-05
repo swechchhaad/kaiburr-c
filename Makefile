@@ -55,22 +55,22 @@ lib/libpqcrystals_kyber1024_ref.so: $(SOURCES) $(HEADERS) symmetric-shake.c
 	$(CC) -shared -fPIC $(CFLAGS) -DKYBER_K=4 $(SOURCES) symmetric-shake.c -o $@
 
 test/test_kyber512: $(SOURCESKECCAK) $(HEADERSKECCAK) test/test_kyber.c randombytes.c
-	$(CC) $(CFLAGS) -DKYBER_K=2 $(SOURCESKECCAK) randombytes.c test/test_kyber.c -o $@
+	$(CC) $(CFLAGS) -DKYBER_K=7 $(SOURCESKECCAK) randombytes.c test/test_kyber.c -o $@
 
 test/test_kyber768: $(SOURCESKECCAK) $(HEADERSKECCAK) test/test_kyber.c randombytes.c
-	$(CC) $(CFLAGS) -DKYBER_K=3 $(SOURCESKECCAK) randombytes.c test/test_kyber.c -o $@
+	$(CC) $(CFLAGS) -DKYBER_K=18 $(SOURCESKECCAK) randombytes.c test/test_kyber.c -o $@
 
 test/test_kyber1024: $(SOURCESKECCAK) $(HEADERSKECCAK) test/test_kyber.c randombytes.c
-	$(CC) $(CFLAGS) -DKYBER_K=4 $(SOURCESKECCAK) randombytes.c test/test_kyber.c -o $@
+	$(CC) $(CFLAGS) -DKYBER_K=24 $(SOURCESKECCAK) randombytes.c test/test_kyber.c -o $@
 
 test/test_vectors512: $(SOURCESKECCAK) $(HEADERSKECCAK) test/test_vectors.c
-	$(CC) $(CFLAGS) -DKYBER_K=2 $(SOURCESKECCAK) test/test_vectors.c -o $@
+	$(CC) $(CFLAGS) -DKYBER_K=7 $(SOURCESKECCAK) test/test_vectors.c -o $@
 
 test/test_vectors768: $(SOURCESKECCAK) $(HEADERSKECCAK) test/test_vectors.c
-	$(CC) $(CFLAGS) -DKYBER_K=3 $(SOURCESKECCAK) test/test_vectors.c -o $@
+	$(CC) $(CFLAGS) -DKYBER_K=18 $(SOURCESKECCAK) test/test_vectors.c -o $@
 
 test/test_vectors1024: $(SOURCESKECCAK) $(HEADERSKECCAK) test/test_vectors.c
-	$(CC) $(CFLAGS) -DKYBER_K=4 $(SOURCESKECCAK) test/test_vectors.c -o $@
+	$(CC) $(CFLAGS) -DKYBER_K=24 $(SOURCESKECCAK) test/test_vectors.c -o $@
 
 test/test_speed512: $(SOURCESKECCAK) $(HEADERSKECCAK) test/cpucycles.h test/cpucycles.c test/speed_print.h test/speed_print.c test/test_speed.c randombytes.c
 	$(CC) $(CFLAGS) -DKYBER_K=2 $(SOURCESKECCAK) randombytes.c test/cpucycles.c test/speed_print.c test/test_speed.c -o $@
