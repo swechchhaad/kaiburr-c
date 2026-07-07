@@ -158,255 +158,144 @@ static unsigned int rej_uniform(int16_t *r,
 #define gen_at(A,B) gen_matrix(A,B,1)
 
 /*************************************************
+* Name:        gen_matrix_x4
+*
+* Description: Sample four matrix entries at once, leveraging the 4-way
+*              batched Keccak. Mirrors mlkem-native's mlk_poly_rej_uniform_x4.
+*
+* Arguments:   - poly *r0,r1,r2,r3: pointers to the four output polynomials
+*              - const uint8_t *seed: pointer to the 32-byte public seed
+*              - const uint8_t *nonces: eight nonce bytes (x0,y0,...,x3,y3),
+*                                       one (x,y) pair per output polynomial
+**************************************************/
+static void gen_matrix_x4(poly *r0, poly *r1, poly *r2, poly *r3,
+                          const uint8_t seed[32], const uint8_t nonces[8])
+{
+  unsigned int ctr0, ctr1, ctr2, ctr3;
+  ALIGNED_UINT8(REJ_UNIFORM_AVX_NBLOCKS*SHAKE128_RATE) buf[4];
+  __m256i f;
+  keccakx4_state state;
+
+  f = _mm256_loadu_si256((__m256i *)seed);
+  _mm256_store_si256(buf[0].vec, f);
+  _mm256_store_si256(buf[1].vec, f);
+  _mm256_store_si256(buf[2].vec, f);
+  _mm256_store_si256(buf[3].vec, f);
+
+  buf[0].coeffs[32] = nonces[0]; buf[0].coeffs[33] = nonces[1];
+  buf[1].coeffs[32] = nonces[2]; buf[1].coeffs[33] = nonces[3];
+  buf[2].coeffs[32] = nonces[4]; buf[2].coeffs[33] = nonces[5];
+  buf[3].coeffs[32] = nonces[6]; buf[3].coeffs[33] = nonces[7];
+
+  shake128x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 34);
+  shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state);
+
+  ctr0 = rej_uniform_avx(r0->coeffs, buf[0].coeffs);
+  ctr1 = rej_uniform_avx(r1->coeffs, buf[1].coeffs);
+  ctr2 = rej_uniform_avx(r2->coeffs, buf[2].coeffs);
+  ctr3 = rej_uniform_avx(r3->coeffs, buf[3].coeffs);
+
+  while(ctr0 < KYBER_N || ctr1 < KYBER_N || ctr2 < KYBER_N || ctr3 < KYBER_N) {
+    shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 1, &state);
+
+    ctr0 += rej_uniform(r0->coeffs + ctr0, KYBER_N - ctr0, buf[0].coeffs, SHAKE128_RATE);
+    ctr1 += rej_uniform(r1->coeffs + ctr1, KYBER_N - ctr1, buf[1].coeffs, SHAKE128_RATE);
+    ctr2 += rej_uniform(r2->coeffs + ctr2, KYBER_N - ctr2, buf[2].coeffs, SHAKE128_RATE);
+    ctr3 += rej_uniform(r3->coeffs + ctr3, KYBER_N - ctr3, buf[3].coeffs, SHAKE128_RATE);
+  }
+
+  poly_nttunpack(r0);
+  poly_nttunpack(r1);
+  poly_nttunpack(r2);
+  poly_nttunpack(r3);
+}
+
+/*************************************************
+* Name:        gen_matrix_x1
+*
+* Description: Sample a single matrix entry using the 1-way Keccak. Used for
+*              the leftover entries when KYBER_K*KYBER_K is not a multiple of 4.
+*
+* Arguments:   - poly *r: pointer to the output polynomial
+*              - const uint8_t *seed: pointer to the 32-byte public seed
+*              - uint8_t x, y: the two nonce bytes for this entry
+**************************************************/
+static void gen_matrix_x1(poly *r, const uint8_t seed[32], uint8_t x, uint8_t y)
+{
+  unsigned int ctr;
+  ALIGNED_UINT8(REJ_UNIFORM_AVX_NBLOCKS*SHAKE128_RATE) buf;
+  __m256i f;
+  keccak_state state;
+
+  f = _mm256_loadu_si256((__m256i *)seed);
+  _mm256_store_si256(buf.vec, f);
+  buf.coeffs[32] = x;
+  buf.coeffs[33] = y;
+
+  shake128_absorb_once(&state, buf.coeffs, 34);
+  shake128_squeezeblocks(buf.coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state);
+
+  ctr = rej_uniform_avx(r->coeffs, buf.coeffs);
+  while(ctr < KYBER_N) {
+    shake128_squeezeblocks(buf.coeffs, 1, &state);
+    ctr += rej_uniform(r->coeffs + ctr, KYBER_N - ctr, buf.coeffs, SHAKE128_RATE);
+  }
+
+  poly_nttunpack(r);
+}
+
+/*************************************************
 * Name:        gen_matrix
 *
 * Description: Deterministically generate matrix A (or the transpose of A)
 *              from a seed. Entries of the matrix are polynomials that look
 *              uniformly random. Performs rejection sampling on output of
-*              a XOF
+*              a XOF.
+*
+*              Entries are sampled four at a time through the batched Keccak,
+*              iterating over all KYBER_K*KYBER_K entries in row-major order.
+*              This mirrors the reference gen_matrix loop (and mlkem-native's
+*              mlk_gen_matrix).
 *
 * Arguments:   - polyvec *a: pointer to ouptput matrix A
 *              - const uint8_t *seed: pointer to input seed
 *              - int transposed: boolean deciding whether A or A^T is generated
 **************************************************/
-#if KYBER_K == 2
 void gen_matrix(polyvec *a, const uint8_t seed[32], int transposed)
 {
-  unsigned int ctr0, ctr1, ctr2, ctr3;
-  ALIGNED_UINT8(REJ_UNIFORM_AVX_NBLOCKS*SHAKE128_RATE) buf[4];
-  __m256i f;
-  keccakx4_state state;
+  unsigned int i, j;
+  uint8_t nonces[8];
 
-  f = _mm256_loadu_si256((__m256i *)seed);
-  _mm256_store_si256(buf[0].vec, f);
-  _mm256_store_si256(buf[1].vec, f);
-  _mm256_store_si256(buf[2].vec, f);
-  _mm256_store_si256(buf[3].vec, f);
-
-  if(transposed) {
-    buf[0].coeffs[32] = 0;
-    buf[0].coeffs[33] = 0;
-    buf[1].coeffs[32] = 0;
-    buf[1].coeffs[33] = 1;
-    buf[2].coeffs[32] = 1;
-    buf[2].coeffs[33] = 0;
-    buf[3].coeffs[32] = 1;
-    buf[3].coeffs[33] = 1;
-  }
-  else {
-    buf[0].coeffs[32] = 0;
-    buf[0].coeffs[33] = 0;
-    buf[1].coeffs[32] = 1;
-    buf[1].coeffs[33] = 0;
-    buf[2].coeffs[32] = 0;
-    buf[2].coeffs[33] = 1;
-    buf[3].coeffs[32] = 1;
-    buf[3].coeffs[33] = 1;
-  }
-
-  shake128x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 34);
-  shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state);
-
-  ctr0 = rej_uniform_avx(a[0].vec[0].coeffs, buf[0].coeffs);
-  ctr1 = rej_uniform_avx(a[0].vec[1].coeffs, buf[1].coeffs);
-  ctr2 = rej_uniform_avx(a[1].vec[0].coeffs, buf[2].coeffs);
-  ctr3 = rej_uniform_avx(a[1].vec[1].coeffs, buf[3].coeffs);
-
-  while(ctr0 < KYBER_N || ctr1 < KYBER_N || ctr2 < KYBER_N || ctr3 < KYBER_N) {
-    shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 1, &state);
-
-    ctr0 += rej_uniform(a[0].vec[0].coeffs + ctr0, KYBER_N - ctr0, buf[0].coeffs, SHAKE128_RATE);
-    ctr1 += rej_uniform(a[0].vec[1].coeffs + ctr1, KYBER_N - ctr1, buf[1].coeffs, SHAKE128_RATE);
-    ctr2 += rej_uniform(a[1].vec[0].coeffs + ctr2, KYBER_N - ctr2, buf[2].coeffs, SHAKE128_RATE);
-    ctr3 += rej_uniform(a[1].vec[1].coeffs + ctr3, KYBER_N - ctr3, buf[3].coeffs, SHAKE128_RATE);
-  }
-
-  poly_nttunpack(&a[0].vec[0]);
-  poly_nttunpack(&a[0].vec[1]);
-  poly_nttunpack(&a[1].vec[0]);
-  poly_nttunpack(&a[1].vec[1]);
-}
-#elif KYBER_K == 3
-void gen_matrix(polyvec *a, const uint8_t seed[32], int transposed)
-{
-  unsigned int ctr0, ctr1, ctr2, ctr3;
-  ALIGNED_UINT8(REJ_UNIFORM_AVX_NBLOCKS*SHAKE128_RATE) buf[4];
-  __m256i f;
-  keccakx4_state state;
-  keccak_state state1x;
-
-  f = _mm256_loadu_si256((__m256i *)seed);
-  _mm256_store_si256(buf[0].vec, f);
-  _mm256_store_si256(buf[1].vec, f);
-  _mm256_store_si256(buf[2].vec, f);
-  _mm256_store_si256(buf[3].vec, f);
-
-  if(transposed) {
-    buf[0].coeffs[32] = 0;
-    buf[0].coeffs[33] = 0;
-    buf[1].coeffs[32] = 0;
-    buf[1].coeffs[33] = 1;
-    buf[2].coeffs[32] = 0;
-    buf[2].coeffs[33] = 2;
-    buf[3].coeffs[32] = 1;
-    buf[3].coeffs[33] = 0;
-  }
-  else {
-    buf[0].coeffs[32] = 0;
-    buf[0].coeffs[33] = 0;
-    buf[1].coeffs[32] = 1;
-    buf[1].coeffs[33] = 0;
-    buf[2].coeffs[32] = 2;
-    buf[2].coeffs[33] = 0;
-    buf[3].coeffs[32] = 0;
-    buf[3].coeffs[33] = 1;
-  }
-
-  shake128x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 34);
-  shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state);
-
-  ctr0 = rej_uniform_avx(a[0].vec[0].coeffs, buf[0].coeffs);
-  ctr1 = rej_uniform_avx(a[0].vec[1].coeffs, buf[1].coeffs);
-  ctr2 = rej_uniform_avx(a[0].vec[2].coeffs, buf[2].coeffs);
-  ctr3 = rej_uniform_avx(a[1].vec[0].coeffs, buf[3].coeffs);
-
-  while(ctr0 < KYBER_N || ctr1 < KYBER_N || ctr2 < KYBER_N || ctr3 < KYBER_N) {
-    shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 1, &state);
-
-    ctr0 += rej_uniform(a[0].vec[0].coeffs + ctr0, KYBER_N - ctr0, buf[0].coeffs, SHAKE128_RATE);
-    ctr1 += rej_uniform(a[0].vec[1].coeffs + ctr1, KYBER_N - ctr1, buf[1].coeffs, SHAKE128_RATE);
-    ctr2 += rej_uniform(a[0].vec[2].coeffs + ctr2, KYBER_N - ctr2, buf[2].coeffs, SHAKE128_RATE);
-    ctr3 += rej_uniform(a[1].vec[0].coeffs + ctr3, KYBER_N - ctr3, buf[3].coeffs, SHAKE128_RATE);
-  }
-
-  poly_nttunpack(&a[0].vec[0]);
-  poly_nttunpack(&a[0].vec[1]);
-  poly_nttunpack(&a[0].vec[2]);
-  poly_nttunpack(&a[1].vec[0]);
-
-  f = _mm256_loadu_si256((__m256i *)seed);
-  _mm256_store_si256(buf[0].vec, f);
-  _mm256_store_si256(buf[1].vec, f);
-  _mm256_store_si256(buf[2].vec, f);
-  _mm256_store_si256(buf[3].vec, f);
-
-  if(transposed) {
-    buf[0].coeffs[32] = 1;
-    buf[0].coeffs[33] = 1;
-    buf[1].coeffs[32] = 1;
-    buf[1].coeffs[33] = 2;
-    buf[2].coeffs[32] = 2;
-    buf[2].coeffs[33] = 0;
-    buf[3].coeffs[32] = 2;
-    buf[3].coeffs[33] = 1;
-  }
-  else {
-    buf[0].coeffs[32] = 1;
-    buf[0].coeffs[33] = 1;
-    buf[1].coeffs[32] = 2;
-    buf[1].coeffs[33] = 1;
-    buf[2].coeffs[32] = 0;
-    buf[2].coeffs[33] = 2;
-    buf[3].coeffs[32] = 1;
-    buf[3].coeffs[33] = 2;
-  }
-
-  shake128x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 34);
-  shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state);
-
-  ctr0 = rej_uniform_avx(a[1].vec[1].coeffs, buf[0].coeffs);
-  ctr1 = rej_uniform_avx(a[1].vec[2].coeffs, buf[1].coeffs);
-  ctr2 = rej_uniform_avx(a[2].vec[0].coeffs, buf[2].coeffs);
-  ctr3 = rej_uniform_avx(a[2].vec[1].coeffs, buf[3].coeffs);
-
-  while(ctr0 < KYBER_N || ctr1 < KYBER_N || ctr2 < KYBER_N || ctr3 < KYBER_N) {
-    shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 1, &state);
-
-    ctr0 += rej_uniform(a[1].vec[1].coeffs + ctr0, KYBER_N - ctr0, buf[0].coeffs, SHAKE128_RATE);
-    ctr1 += rej_uniform(a[1].vec[2].coeffs + ctr1, KYBER_N - ctr1, buf[1].coeffs, SHAKE128_RATE);
-    ctr2 += rej_uniform(a[2].vec[0].coeffs + ctr2, KYBER_N - ctr2, buf[2].coeffs, SHAKE128_RATE);
-    ctr3 += rej_uniform(a[2].vec[1].coeffs + ctr3, KYBER_N - ctr3, buf[3].coeffs, SHAKE128_RATE);
-  }
-
-  poly_nttunpack(&a[1].vec[1]);
-  poly_nttunpack(&a[1].vec[2]);
-  poly_nttunpack(&a[2].vec[0]);
-  poly_nttunpack(&a[2].vec[1]);
-
-  f = _mm256_loadu_si256((__m256i *)seed);
-  _mm256_store_si256(buf[0].vec, f);
-  buf[0].coeffs[32] = 2;
-  buf[0].coeffs[33] = 2;
-  shake128_absorb_once(&state1x, buf[0].coeffs, 34);
-  shake128_squeezeblocks(buf[0].coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state1x);
-  ctr0 = rej_uniform_avx(a[2].vec[2].coeffs, buf[0].coeffs);
-  while(ctr0 < KYBER_N) {
-    shake128_squeezeblocks(buf[0].coeffs, 1, &state1x);
-    ctr0 += rej_uniform(a[2].vec[2].coeffs + ctr0, KYBER_N - ctr0, buf[0].coeffs, SHAKE128_RATE);
-  }
-
-  poly_nttunpack(&a[2].vec[2]);
-}
-#elif KYBER_K == 4
-void gen_matrix(polyvec *a, const uint8_t seed[32], int transposed)
-{
-  unsigned int i, ctr0, ctr1, ctr2, ctr3;
-  ALIGNED_UINT8(REJ_UNIFORM_AVX_NBLOCKS*SHAKE128_RATE) buf[4];
-  __m256i f;
-  keccakx4_state state;
-
-  for(i=0;i<4;i++) {
-    f = _mm256_loadu_si256((__m256i *)seed);
-    _mm256_store_si256(buf[0].vec, f);
-    _mm256_store_si256(buf[1].vec, f);
-    _mm256_store_si256(buf[2].vec, f);
-    _mm256_store_si256(buf[3].vec, f);
-
-    if(transposed) {
-      buf[0].coeffs[32] = i;
-      buf[0].coeffs[33] = 0;
-      buf[1].coeffs[32] = i;
-      buf[1].coeffs[33] = 1;
-      buf[2].coeffs[32] = i;
-      buf[2].coeffs[33] = 2;
-      buf[3].coeffs[32] = i;
-      buf[3].coeffs[33] = 3;
+  /* four matrix entries at a time via the batched Keccak */
+  for(i = 0; i + 4 <= KYBER_K*KYBER_K; i += 4) {
+    for(j = 0; j < 4; j++) {
+      uint8_t x = (uint8_t)((i+j)/KYBER_K);   /* row */
+      uint8_t y = (uint8_t)((i+j)%KYBER_K);   /* col */
+      if(transposed) {
+        nonces[2*j+0] = x;
+        nonces[2*j+1] = y;
+      } else {
+        nonces[2*j+0] = y;
+        nonces[2*j+1] = x;
+      }
     }
-    else {
-      buf[0].coeffs[32] = 0;
-      buf[0].coeffs[33] = i;
-      buf[1].coeffs[32] = 1;
-      buf[1].coeffs[33] = i;
-      buf[2].coeffs[32] = 2;
-      buf[2].coeffs[33] = i;
-      buf[3].coeffs[32] = 3;
-      buf[3].coeffs[33] = i;
-    }
+    gen_matrix_x4(&a[ i   /KYBER_K].vec[ i   %KYBER_K],
+                  &a[(i+1)/KYBER_K].vec[(i+1)%KYBER_K],
+                  &a[(i+2)/KYBER_K].vec[(i+2)%KYBER_K],
+                  &a[(i+3)/KYBER_K].vec[(i+3)%KYBER_K],
+                  seed, nonces);
+  }
 
-    shake128x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 34);
-    shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, REJ_UNIFORM_AVX_NBLOCKS, &state);
-
-    ctr0 = rej_uniform_avx(a[i].vec[0].coeffs, buf[0].coeffs);
-    ctr1 = rej_uniform_avx(a[i].vec[1].coeffs, buf[1].coeffs);
-    ctr2 = rej_uniform_avx(a[i].vec[2].coeffs, buf[2].coeffs);
-    ctr3 = rej_uniform_avx(a[i].vec[3].coeffs, buf[3].coeffs);
-
-    while(ctr0 < KYBER_N || ctr1 < KYBER_N || ctr2 < KYBER_N || ctr3 < KYBER_N) {
-      shake128x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 1, &state);
-
-      ctr0 += rej_uniform(a[i].vec[0].coeffs + ctr0, KYBER_N - ctr0, buf[0].coeffs, SHAKE128_RATE);
-      ctr1 += rej_uniform(a[i].vec[1].coeffs + ctr1, KYBER_N - ctr1, buf[1].coeffs, SHAKE128_RATE);
-      ctr2 += rej_uniform(a[i].vec[2].coeffs + ctr2, KYBER_N - ctr2, buf[2].coeffs, SHAKE128_RATE);
-      ctr3 += rej_uniform(a[i].vec[3].coeffs + ctr3, KYBER_N - ctr3, buf[3].coeffs, SHAKE128_RATE);
-    }
-
-    poly_nttunpack(&a[i].vec[0]);
-    poly_nttunpack(&a[i].vec[1]);
-    poly_nttunpack(&a[i].vec[2]);
-    poly_nttunpack(&a[i].vec[3]);
+  /* leftover entries (KYBER_K*KYBER_K mod 4) one at a time */
+  for(; i < KYBER_K*KYBER_K; i++) {
+    uint8_t x = (uint8_t)(i/KYBER_K);   /* row */
+    uint8_t y = (uint8_t)(i%KYBER_K);   /* col */
+    if(transposed)
+      gen_matrix_x1(&a[i/KYBER_K].vec[i%KYBER_K], seed, x, y);
+    else
+      gen_matrix_x1(&a[i/KYBER_K].vec[i%KYBER_K], seed, y, x);
   }
 }
-#endif
 
 /*************************************************
 * Name:        indcpa_keypair_derand
