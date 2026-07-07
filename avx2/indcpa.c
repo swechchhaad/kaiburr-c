@@ -86,8 +86,8 @@ static void unpack_sk(polyvec *sk, const uint8_t packedsk[KYBER_INDCPA_SECRETKEY
 * Name:        pack_ciphertext
 *
 * Description: Serialize the ciphertext as concatenation of the
-*              compressed and serialized vector of polynomials b
-*              and the compressed and serialized polynomial v.
+*              serialized vector of polynomials b
+*              and the serialized polynomial v.
 *              The polynomial coefficients in b and v are assumed to
 *              lie in the invertal [0,q], i.e. b and v must be reduced
 *              by polyvec_reduce() and poly_reduce(), respectively.
@@ -98,14 +98,14 @@ static void unpack_sk(polyvec *sk, const uint8_t packedsk[KYBER_INDCPA_SECRETKEY
 **************************************************/
 static void pack_ciphertext(uint8_t r[KYBER_INDCPA_BYTES], polyvec *b, poly *v)
 {
-  polyvec_compress(r, b);
-  poly_compress(r+KYBER_POLYVECCOMPRESSEDBYTES, v);
+  polyvec_tobytes(r, b);
+  poly_tobytes(r+KYBER_POLYVECBYTES, v);
 }
 
 /*************************************************
 * Name:        unpack_ciphertext
 *
-* Description: De-serialize and decompress ciphertext from a byte array;
+* Description: De-serialize ciphertext from a byte array;
 *              approximate inverse of pack_ciphertext
 *
 * Arguments:   - polyvec *b: pointer to the output vector of polynomials b
@@ -114,8 +114,8 @@ static void pack_ciphertext(uint8_t r[KYBER_INDCPA_BYTES], polyvec *b, poly *v)
 **************************************************/
 static void unpack_ciphertext(polyvec *b, poly *v, const uint8_t c[KYBER_INDCPA_BYTES])
 {
-  polyvec_decompress(b, c);
-  poly_decompress(v, c+KYBER_POLYVECCOMPRESSEDBYTES);
+  polyvec_frombytes(b, c);
+  poly_frombytes(v, c+KYBER_POLYVECBYTES);
 }
 
 /*************************************************
