@@ -8,7 +8,7 @@
 #include "polyvec.h"
 #include "poly.h"
 #include "ntt.h"
-#include "cbd.h"
+#include "fn.h"
 #include "rejsample.h"
 #include "symmetric.h"
 #include "randombytes.h"

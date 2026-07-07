@@ -7,7 +7,7 @@
 #include "ntt.h"
 #include "consts.h"
 #include "reduce.h"
-#include "cbd.h"
+#include "fn.h"
 #include "symmetric.h"
 
 /*************************************************
