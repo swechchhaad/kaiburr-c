@@ -135,54 +135,33 @@ void poly_tomsg(uint8_t msg[KYBER_INDCPA_MSGBYTES], const poly * restrict a)
 }
 
 /*************************************************
-* Name:        poly_getnoise_eta1
+* Name:        poly_getnoise
 *
 * Description: Sample a polynomial deterministically from a seed and a nonce,
-*              with output polynomial close to centered binomial distribution
-*              with parameter KYBER_ETA1
+*              with output distributed according to f(n).
 *
 * Arguments:   - poly *r: pointer to output polynomial
 *              - const uint8_t *seed: pointer to input seed
 *                                     (of length KYBER_SYMBYTES bytes)
 *              - uint8_t nonce: one-byte input nonce
 **************************************************/
-void poly_getnoise_eta1(poly *r, const uint8_t seed[KYBER_SYMBYTES], uint8_t nonce)
+void poly_getnoise(poly *r, const uint8_t seed[KYBER_SYMBYTES], uint8_t nonce)
 {
-  ALIGNED_UINT8(KYBER_ETA1*KYBER_N/4+32) buf; // +32 bytes as required by poly_cbd_eta1
-  prf(buf.coeffs, KYBER_ETA1*KYBER_N/4, seed, nonce);
-  poly_cbd_eta1(r, buf.vec);
+  ALIGNED_UINT8(KYBER_NOISE_BYTES+32) buf; // +32 bytes of slack for fn6's over-reading loads
+  prf(buf.coeffs, KYBER_NOISE_BYTES, seed, nonce);
+  poly_fn(r, buf.vec);
 }
 
-/*************************************************
-* Name:        poly_getnoise_eta2
-*
-* Description: Sample a polynomial deterministically from a seed and a nonce,
-*              with output polynomial close to centered binomial distribution
-*              with parameter KYBER_ETA2
-*
-* Arguments:   - poly *r: pointer to output polynomial
-*              - const uint8_t *seed: pointer to input seed
-*                                     (of length KYBER_SYMBYTES bytes)
-*              - uint8_t nonce: one-byte input nonce
-**************************************************/
-void poly_getnoise_eta2(poly *r, const uint8_t seed[KYBER_SYMBYTES], uint8_t nonce)
-{
-  ALIGNED_UINT8(KYBER_ETA2*KYBER_N/4) buf;
-  prf(buf.coeffs, KYBER_ETA2*KYBER_N/4, seed, nonce);
-  poly_cbd_eta2(r, buf.vec);
-}
-
-#ifndef KYBER_90S
-#define NOISE_NBLOCKS ((KYBER_ETA1*KYBER_N/4+SHAKE256_RATE-1)/SHAKE256_RATE)
-void poly_getnoise_eta1_4x(poly *r0,
-                           poly *r1,
-                           poly *r2,
-                           poly *r3,
-                           const uint8_t seed[32],
-                           uint8_t nonce0,
-                           uint8_t nonce1,
-                           uint8_t nonce2,
-                           uint8_t nonce3)
+#define NOISE_NBLOCKS ((KYBER_NOISE_BYTES+SHAKE256_RATE-1)/SHAKE256_RATE)
+void poly_getnoise_4x(poly *r0,
+                      poly *r1,
+                      poly *r2,
+                      poly *r3,
+                      const uint8_t seed[32],
+                      uint8_t nonce0,
+                      uint8_t nonce1,
+                      uint8_t nonce2,
+                      uint8_t nonce3)
 {
   ALIGNED_UINT8(NOISE_NBLOCKS*SHAKE256_RATE) buf[4];
   __m256i f;
@@ -202,48 +181,11 @@ void poly_getnoise_eta1_4x(poly *r0,
   shake256x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 33);
   shake256x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, NOISE_NBLOCKS, &state);
 
-  poly_cbd_eta1(r0, buf[0].vec);
-  poly_cbd_eta1(r1, buf[1].vec);
-  poly_cbd_eta1(r2, buf[2].vec);
-  poly_cbd_eta1(r3, buf[3].vec);
+  poly_fn(r0, buf[0].vec);
+  poly_fn(r1, buf[1].vec);
+  poly_fn(r2, buf[2].vec);
+  poly_fn(r3, buf[3].vec);
 }
-
-#if KYBER_K == 2
-void poly_getnoise_eta1122_4x(poly *r0,
-                              poly *r1,
-                              poly *r2,
-                              poly *r3,
-                              const uint8_t seed[32],
-                              uint8_t nonce0,
-                              uint8_t nonce1,
-                              uint8_t nonce2,
-                              uint8_t nonce3)
-{
-  ALIGNED_UINT8(NOISE_NBLOCKS*SHAKE256_RATE) buf[4];
-  __m256i f;
-  keccakx4_state state;
-
-  f = _mm256_loadu_si256((__m256i *)seed);
-  _mm256_store_si256(buf[0].vec, f);
-  _mm256_store_si256(buf[1].vec, f);
-  _mm256_store_si256(buf[2].vec, f);
-  _mm256_store_si256(buf[3].vec, f);
-
-  buf[0].coeffs[32] = nonce0;
-  buf[1].coeffs[32] = nonce1;
-  buf[2].coeffs[32] = nonce2;
-  buf[3].coeffs[32] = nonce3;
-
-  shake256x4_absorb_once(&state, buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, 33);
-  shake256x4_squeezeblocks(buf[0].coeffs, buf[1].coeffs, buf[2].coeffs, buf[3].coeffs, NOISE_NBLOCKS, &state);
-
-  poly_cbd_eta1(r0, buf[0].vec);
-  poly_cbd_eta1(r1, buf[1].vec);
-  poly_cbd_eta2(r2, buf[2].vec);
-  poly_cbd_eta2(r3, buf[3].vec);
-}
-#endif
-#endif
 
 /*************************************************
 * Name:        poly_ntt

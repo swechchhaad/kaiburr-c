@@ -83,30 +83,69 @@ static void unpack_sk(polyvec *sk, const uint8_t packedsk[KYBER_INDCPA_SECRETKEY
 }
 
 /*************************************************
+* Standard-order 12-bit (de)serialization for the ciphertext.
+*
+* The ciphertext polynomials b and v are in the normal domain and standard
+* coefficient order (they come out of the inverse NTT), so they need to be
+* packed with the plain 12-bit layout used by the reference implementation.
+**************************************************/
+static void cpoly_tobytes(uint8_t r[KYBER_POLYBYTES], const poly *a)
+{
+  unsigned int i;
+  uint16_t t0, t1;
+  int16_t u0, u1;
+  for(i=0;i<KYBER_N/2;i++) {
+    u0  = a->coeffs[2*i];
+    u0 += (u0 >> 15) & KYBER_Q;
+    u0 -= KYBER_Q;
+    u0 += (u0 >> 15) & KYBER_Q;
+    t0  = u0;
+    u1  = a->coeffs[2*i+1];
+    u1 += (u1 >> 15) & KYBER_Q;
+    u1 -= KYBER_Q;
+    u1 += (u1 >> 15) & KYBER_Q;
+    t1  = u1;
+    r[3*i+0] = (t0 >> 0);
+    r[3*i+1] = (t0 >> 8) | (t1 << 4);
+    r[3*i+2] = (t1 >> 4);
+  }
+}
+
+static void cpoly_frombytes(poly *r, const uint8_t a[KYBER_POLYBYTES])
+{
+  unsigned int i;
+  for(i=0;i<KYBER_N/2;i++) {
+    r->coeffs[2*i+0] = ((a[3*i+0] >> 0) | ((uint16_t)a[3*i+1] << 8)) & 0xFFF;
+    r->coeffs[2*i+1] = ((a[3*i+1] >> 4) | ((uint16_t)a[3*i+2] << 4)) & 0xFFF;
+  }
+}
+
+/*************************************************
 * Name:        pack_ciphertext
 *
 * Description: Serialize the ciphertext as concatenation of the
 *              serialized vector of polynomials b
 *              and the serialized polynomial v.
-*              The polynomial coefficients in b and v are assumed to
-*              lie in the invertal [0,q], i.e. b and v must be reduced
-*              by polyvec_reduce() and poly_reduce(), respectively.
+*              b and v are in standard coefficient order and
+*              must be reduced to [0,q) by polyvec_reduce()/poly_reduce().
 *
 * Arguments:   uint8_t *r: pointer to the output serialized ciphertext
-*              poly *pk: pointer to the input vector of polynomials b
+*              poly *b: pointer to the input vector of polynomials b
 *              poly *v: pointer to the input polynomial v
 **************************************************/
 static void pack_ciphertext(uint8_t r[KYBER_INDCPA_BYTES], polyvec *b, poly *v)
 {
-  polyvec_tobytes(r, b);
-  poly_tobytes(r+KYBER_POLYVECBYTES, v);
+  unsigned int i;
+  for(i=0;i<KYBER_K;i++)
+    cpoly_tobytes(r + i*KYBER_POLYBYTES, &b->vec[i]);
+  cpoly_tobytes(r+KYBER_POLYVECBYTES, v);
 }
 
 /*************************************************
 * Name:        unpack_ciphertext
 *
 * Description: De-serialize ciphertext from a byte array;
-*              approximate inverse of pack_ciphertext
+*              inverse of pack_ciphertext
 *
 * Arguments:   - polyvec *b: pointer to the output vector of polynomials b
 *              - poly *v: pointer to the output polynomial v
@@ -114,8 +153,10 @@ static void pack_ciphertext(uint8_t r[KYBER_INDCPA_BYTES], polyvec *b, poly *v)
 **************************************************/
 static void unpack_ciphertext(polyvec *b, poly *v, const uint8_t c[KYBER_INDCPA_BYTES])
 {
-  polyvec_frombytes(b, c);
-  poly_frombytes(v, c+KYBER_POLYVECBYTES);
+  unsigned int i;
+  for(i=0;i<KYBER_K;i++)
+    cpoly_frombytes(&b->vec[i], c + i*KYBER_POLYBYTES);
+  cpoly_frombytes(v, c+KYBER_POLYVECBYTES);
 }
 
 /*************************************************
@@ -326,15 +367,20 @@ void indcpa_keypair_derand(uint8_t pk[KYBER_INDCPA_PUBLICKEYBYTES],
 
   gen_a(a, publicseed);
 
-#if KYBER_K == 2
-  poly_getnoise_eta1_4x(skpv.vec+0, skpv.vec+1, e.vec+0, e.vec+1, noiseseed, 0, 1, 2, 3);
-#elif KYBER_K == 3
-  poly_getnoise_eta1_4x(skpv.vec+0, skpv.vec+1, skpv.vec+2, e.vec+0, noiseseed, 0, 1, 2, 3);
-  poly_getnoise_eta1_4x(e.vec+1, e.vec+2, pkpv.vec+0, pkpv.vec+1, noiseseed, 4, 5, 6, 7);
-#elif KYBER_K == 4
-  poly_getnoise_eta1_4x(skpv.vec+0, skpv.vec+1, skpv.vec+2, skpv.vec+3, noiseseed,  0, 1, 2, 3);
-  poly_getnoise_eta1_4x(e.vec+0, e.vec+1, e.vec+2, e.vec+3, noiseseed, 4, 5, 6, 7);
-#endif
+  /* Sample the secret s and error e, four at a time via the batched Keccak. */
+  {
+    poly *noise[2*KYBER_K];
+    unsigned int n;
+    for(i = 0; i < KYBER_K; i++) {
+      noise[i]         = &skpv.vec[i];
+      noise[KYBER_K+i] = &e.vec[i];
+    }
+    for(n = 0; n + 4 <= 2*KYBER_K; n += 4)
+      poly_getnoise_4x(noise[n], noise[n+1], noise[n+2], noise[n+3],
+                       noiseseed, n, n+1, n+2, n+3);
+    for(; n < 2*KYBER_K; n++)
+      poly_getnoise(noise[n], noiseseed, n);
+  }
 
   polyvec_ntt(&skpv);
   polyvec_reduce(&skpv);
@@ -383,17 +429,21 @@ void indcpa_enc(uint8_t c[KYBER_INDCPA_BYTES],
   poly_frommsg(&k, m);
   gen_at(at, seed);
 
-#if KYBER_K == 2
-  poly_getnoise_eta1122_4x(sp.vec+0, sp.vec+1, ep.vec+0, ep.vec+1, coins, 0, 1, 2, 3);
-  poly_getnoise_eta2(&epp, coins, 4);
-#elif KYBER_K == 3
-  poly_getnoise_eta1_4x(sp.vec+0, sp.vec+1, sp.vec+2, ep.vec+0, coins, 0, 1, 2 ,3);
-  poly_getnoise_eta1_4x(ep.vec+1, ep.vec+2, &epp, b.vec+0, coins,  4, 5, 6, 7);
-#elif KYBER_K == 4
-  poly_getnoise_eta1_4x(sp.vec+0, sp.vec+1, sp.vec+2, sp.vec+3, coins, 0, 1, 2, 3);
-  poly_getnoise_eta1_4x(ep.vec+0, ep.vec+1, ep.vec+2, ep.vec+3, coins, 4, 5, 6, 7);
-  poly_getnoise_eta2(&epp, coins, 8);
-#endif
+  /* Sample s', e1 and e2, four at a time. */
+  {
+    poly *noise[2*KYBER_K+1];
+    unsigned int n;
+    for(i = 0; i < KYBER_K; i++) {
+      noise[i]         = &sp.vec[i];
+      noise[KYBER_K+i] = &ep.vec[i];
+    }
+    noise[2*KYBER_K] = &epp;
+    for(n = 0; n + 4 <= 2*KYBER_K+1; n += 4)
+      poly_getnoise_4x(noise[n], noise[n+1], noise[n+2], noise[n+3],
+                       coins, n, n+1, n+2, n+3);
+    for(; n < 2*KYBER_K+1; n++)
+      poly_getnoise(noise[n], coins, n);
+  }
 
   polyvec_ntt(&sp);
 

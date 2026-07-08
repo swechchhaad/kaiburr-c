@@ -1,0 +1,20 @@
+# object files, archives and shared libraries
+*.o
+*.a
+*.so
+lib/
+
+# test / benchmark binaries
+test/test_kaiburr4
+test/test_kaiburr6
+test/test_kaiburr8
+test/test_vectors4
+test/test_vectors6
+test/test_vectors8
+test/test_speed4
+test/test_speed6
+test/test_speed8
+
+# KAT outputs (if ever generated)
+*.req
+*.rsp
