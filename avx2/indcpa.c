@@ -86,37 +86,53 @@ static void unpack_sk(polyvec *sk, const uint8_t packedsk[KYBER_INDCPA_SECRETKEY
 * Standard-order 12-bit (de)serialization for the ciphertext.
 *
 * The ciphertext polynomials b and v are in the normal domain and standard
-* coefficient order (they come out of the inverse NTT), so they need to be
-* packed with the plain 12-bit layout used by the reference implementation.
+* coefficient order (they come out of the inverse NTT), so they are packed
+* with the plain 12-bit layout used by ref
 **************************************************/
 static void cpoly_tobytes(uint8_t r[KYBER_POLYBYTES], const poly *a)
 {
   unsigned int i;
-  uint16_t t0, t1;
-  int16_t u0, u1;
-  for(i=0;i<KYBER_N/2;i++) {
-    u0  = a->coeffs[2*i];
-    u0 += (u0 >> 15) & KYBER_Q;
-    u0 -= KYBER_Q;
-    u0 += (u0 >> 15) & KYBER_Q;
-    t0  = u0;
-    u1  = a->coeffs[2*i+1];
-    u1 += (u1 >> 15) & KYBER_Q;
-    u1 -= KYBER_Q;
-    u1 += (u1 >> 15) & KYBER_Q;
-    t1  = u1;
-    r[3*i+0] = (t0 >> 0);
-    r[3*i+1] = (t0 >> 8) | (t1 << 4);
-    r[3*i+2] = (t1 >> 4);
+  __m256i f, g;
+  __m128i lo, hi;
+  uint8_t tmp[32];
+  const __m256i vq   = _mm256_set1_epi16(KYBER_Q);
+  const __m256i vmul = _mm256_set1_epi32((4096 << 16) | 1);  
+  const __m256i shuf = _mm256_setr_epi8( 0, 1, 2, 4, 5, 6, 8, 9,10,12,13,14,-1,-1,-1,-1,
+                                         0, 1, 2, 4, 5, 6, 8, 9,10,12,13,14,-1,-1,-1,-1);
+
+  for(i = 0; i < KYBER_N/16; i++) {
+    f = _mm256_load_si256(&a->vec[i]);
+    f = _mm256_add_epi16(f, _mm256_and_si256(_mm256_srai_epi16(f, 15), vq));
+    f = _mm256_sub_epi16(f, vq);
+    f = _mm256_add_epi16(f, _mm256_and_si256(_mm256_srai_epi16(f, 15), vq));
+    g = _mm256_madd_epi16(f, vmul);
+    g  = _mm256_shuffle_epi8(g, shuf);
+    lo = _mm256_castsi256_si128(g);
+    hi = _mm256_extracti128_si256(g, 1);
+    _mm_storeu_si128((__m128i *)(tmp + 0),  lo);
+    _mm_storeu_si128((__m128i *)(tmp + 12), hi);
+    memcpy(r + 24*i, tmp, 24);
   }
 }
 
 static void cpoly_frombytes(poly *r, const uint8_t a[KYBER_POLYBYTES])
 {
   unsigned int i;
-  for(i=0;i<KYBER_N/2;i++) {
-    r->coeffs[2*i+0] = ((a[3*i+0] >> 0) | ((uint16_t)a[3*i+1] << 8)) & 0xFFF;
-    r->coeffs[2*i+1] = ((a[3*i+1] >> 4) | ((uint16_t)a[3*i+2] << 4)) & 0xFFF;
+  __m256i v, clo, chi;
+  __m128i lo, hi;
+  const __m256i mask = _mm256_set1_epi32(0xFFF);
+  const __m256i shuf = _mm256_setr_epi8( 0, 1, 2,-1, 3, 4, 5,-1, 6, 7, 8,-1, 9,10,11,-1,
+                                         4, 5, 6,-1, 7, 8, 9,-1,10,11,12,-1,13,14,15,-1);
+
+  for(i = 0; i < KYBER_N/16; i++) {
+    lo = _mm_loadu_si128((const __m128i *)(a + 24*i));  
+    hi = _mm_loadu_si128((const __m128i *)(a + 24*i + 8)); 
+    v  = _mm256_set_m128i(hi, lo);
+    v   = _mm256_shuffle_epi8(v, shuf);
+    clo = _mm256_and_si256(v, mask);                
+    chi = _mm256_and_si256(_mm256_srli_epi32(v, 12), mask); 
+    v   = _mm256_or_si256(clo, _mm256_slli_epi32(chi, 16));
+    _mm256_store_si256(&r->vec[i], v);
   }
 }
 
