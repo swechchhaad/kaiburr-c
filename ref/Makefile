@@ -6,7 +6,7 @@ RM = /bin/rm
 
 SOURCES = kem.c indcpa.c polyvec.c poly.c ntt.c fn.c reduce.c verify.c
 SOURCESKECCAK = $(SOURCES) fips202.c symmetric-shake.c
-HEADERS = params.h kem.h indcpa.h polyvec.h poly.h ntt.h fn.h reduce.c verify.h symmetric.h
+HEADERS = params.h kem.h indcpa.h polyvec.h poly.h ntt.h fn.h reduce.h verify.h symmetric.h
 HEADERSKECCAK = $(HEADERS) fips202.h
 
 .PHONY: all speed shared clean
