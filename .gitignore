@@ -1,0 +1,27 @@
+# compiled objects and libraries
+*.o
+*.a
+*.so
+
+# coverage artifacts
+*.gcno
+*.gcda
+*.lcov
+
+# ref/avx2 test binaries
+test/test_kaiburr4
+test/test_kaiburr6
+test/test_kaiburr8
+test/test_vectors4
+test/test_vectors6
+test/test_vectors8
+test/test_speed4
+test/test_speed6
+test/test_speed8
+
+# shared-library output dir
+lib/
+
+# failure-rate output
+tests/bin/
+tests/logs/
