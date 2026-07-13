@@ -103,3 +103,5 @@ schoolbook	3
 
 mov		%r8,%rsp
 ret
+
+.section .note.GNU-stack,"",@progbits
