@@ -1,8 +1,13 @@
 CC ?= /usr/bin/cc
 CFLAGS += -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls \
-  -Wshadow -Wpointer-arith -O3 -fomit-frame-pointer -z noexecstack
+  -Wshadow -Wpointer-arith -O3 -fomit-frame-pointer
 NISTFLAGS += -Wno-unused-result -O3 -fomit-frame-pointer
 RM = /bin/rm
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+  CFLAGS += -Wl,-z,noexecstack
+endif
 
 SOURCES = kem.c indcpa.c polyvec.c poly.c ntt.c fn.c reduce.c verify.c
 SOURCESKECCAK = $(SOURCES) fips202.c symmetric-shake.c

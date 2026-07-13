@@ -1,10 +1,16 @@
 CC ?= /usr/bin/cc
 CFLAGS += -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wredundant-decls \
   -Wshadow -Wpointer-arith -mavx2 -mbmi2 -mpopcnt \
-  -march=native -mtune=native -O3 -fomit-frame-pointer -z noexecstack
+  -march=native -mtune=native -O3 -fomit-frame-pointer
 NISTFLAGS += -Wno-unused-result -mavx2 -mbmi2 -mpopcnt \
   -march=native -mtune=native -O3 -fomit-frame-pointer
 RM = /bin/rm
+
+# Apple's ld rejects -z.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+  CFLAGS += -Wl,-z,noexecstack
+endif
 
 SOURCES = kem.c indcpa.c polyvec.c poly.c fq.S shuffle.S ntt.S invntt.S \
   basemul.S consts.c rejsample.c fn.c verify.c
